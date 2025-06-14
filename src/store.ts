@@ -1,7 +1,8 @@
-// --- src/store.ts (Zustand Store) ---
+// --- File: src/store.ts (Zustand Store) ---
 import create from 'zustand';
 import Peer from 'simple-peer';
 
+// Define the shape of a single peer's state
 type PeerState = {
   [key: string]: {
     peer: Peer.Instance;
@@ -9,6 +10,7 @@ type PeerState = {
   };
 };
 
+// Define the shape of the entire application's global state
 type AppState = {
   localStream: MediaStream | null;
   peers: PeerState;
@@ -32,6 +34,7 @@ export const useStore = create<AppState>((set) => ({
     set((state) => {
       const newPeers = { ...state.peers };
       if (newPeers[peerId]) {
+        // Important: Cleanly destroy the peer connection
         newPeers[peerId].peer.destroy();
       }
       delete newPeers[peerId];
