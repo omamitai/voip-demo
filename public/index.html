@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Starlight Calls - WebRTC Group Chat</title>
+    <title>Starlight Calls - AI-Powered Group Chat</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Font Awesome for Icons -->
@@ -39,6 +39,9 @@
         .icon-button.danger {
             @apply bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
         }
+        .icon-button.ai {
+            @apply bg-purple-600 text-white hover:bg-purple-700 focus:ring-purple-500;
+        }
         .participant-card {
             @apply bg-gray-800 p-4 rounded-lg flex items-center space-x-4 ring-2 ring-transparent transition-all duration-150;
         }
@@ -50,6 +53,9 @@
         }
         .mic-level-fill {
             @apply h-full bg-green-400 transition-all duration-100;
+        }
+        .summary-modal {
+            @apply fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50 transition-opacity;
         }
     </style>
 </head>
@@ -86,23 +92,21 @@
     <!-- Call Screen -->
     <div id="call-screen" class="screen !flex-col !justify-start p-4">
         <div class="w-full h-full flex flex-col">
-            <!-- Header -->
             <header class="flex-shrink-0 flex items-center justify-between mb-4">
                 <h1 class="text-2xl font-bold">Room: <span id="room-id-display" class="font-mono text-indigo-400"></span></h1>
                 <button id="copy-link-btn" class="px-3 py-2 text-sm font-medium bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors">
                     <i class="fas fa-copy mr-2"></i>Copy Invite Link
                 </button>
             </header>
-
-            <!-- Participants Grid -->
             <main class="flex-grow grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4" id="participants-grid">
-                <!-- Participant cards will be inserted here -->
+                <!-- Participant cards inserted here -->
             </main>
-
-            <!-- Controls Footer -->
             <footer class="flex-shrink-0 bg-gray-800/50 backdrop-blur-sm rounded-xl mt-4 p-4 flex items-center justify-center space-x-4">
                 <button id="mute-btn" class="icon-button active">
                     <i class="fas fa-microphone"></i>
+                </button>
+                <button id="summarize-btn" class="icon-button ai">
+                    <i class="fas fa-wand-magic-sparkles"></i>
                 </button>
                 <button id="disconnect-btn" class="icon-button danger">
                     <i class="fas fa-phone-slash"></i>
@@ -111,12 +115,21 @@
         </div>
     </div>
     
-    <!-- Container for remote audio elements (hidden from user) -->
+    <!-- Summary Modal -->
+    <div id="summary-modal" class="summary-modal hidden opacity-0">
+        <div class="bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+            <header class="p-4 border-b border-gray-700 flex justify-between items-center">
+                <h2 class="text-xl font-semibold"><i class="fas fa-wand-magic-sparkles mr-3 text-purple-400"></i>Conversation Summary</h2>
+                <button id="close-summary-btn" class="text-gray-400 hover:text-white">&times;</button>
+            </header>
+            <div id="summary-content" class="p-6 overflow-y-auto prose prose-invert prose-p:text-gray-300 prose-ul:text-gray-300">
+                <!-- Summary will be inserted here -->
+            </div>
+        </div>
+    </div>
+    
     <div id="remote-audio-container" class="hidden"></div>
-
-    <!-- Simple-Peer library -->
     <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
     <script src="/client.js"></script>
-
 </body>
 </html>
