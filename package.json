@@ -1,0 +1,15 @@
+{
+  "name": "webrtc-voip-demo",
+  "version": "1.0.0",
+  "description": "Minimal WebRTC VoIP demo",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "author": "Gemini",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.17.0"
+  }
+}
