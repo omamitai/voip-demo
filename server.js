@@ -1,5 +1,5 @@
-// server.js
-// A simple signaling server for WebRTC
+// server.js (v2 - Multi-User)
+// Signaling server for WebRTC group calls
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
@@ -8,14 +8,15 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// Serve static files from the 'public' directory
 app.use(express.static('public'));
 
-// In-memory store for rooms and their occupants
+// In-memory store for rooms and their occupants (sockets)
 const rooms = {};
 
 wss.on('connection', (ws) => {
-    console.log('Client connected to signaling server');
+    console.log('Client connected');
+    let currentRoomId = null;
+    let currentUserId = null;
 
     ws.on('message', (message) => {
         let data;
@@ -26,79 +27,80 @@ wss.on('connection', (ws) => {
             return;
         }
 
-        const { type, roomId, payload } = data;
-
+        const { type, roomId, userId, payload } = data;
+        
         switch (type) {
-            // A user wants to create and join a new room
-            case 'create':
-                if (!roomId) {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Room ID is required.' }));
-                    return;
-                }
-                if (rooms[roomId]) {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Room already exists.' }));
-                    return;
-                }
-                rooms[roomId] = [ws];
-                ws.roomId = roomId; // Associate ws with the room
-                ws.send(JSON.stringify({ type: 'created', roomId }));
-                console.log(`Room created: ${roomId}`);
-                break;
+            // A user wants to join a room.
+            case 'join-room':
+                if (!roomId || !userId) return;
 
-            // A user wants to join an existing room
-            case 'join':
-                if (!roomId || !rooms[roomId]) {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Room does not exist.' }));
-                    return;
-                }
-                if (rooms[roomId].length >= 2) {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Room is full.' }));
-                    return;
+                currentRoomId = roomId;
+                currentUserId = userId;
+
+                // If room doesn't exist, create it.
+                if (!rooms[roomId]) {
+                    rooms[roomId] = [];
                 }
 
-                // Add the second user and notify both parties
-                rooms[roomId].push(ws);
-                ws.roomId = roomId;
+                // Get all other users already in the room.
+                const otherUsers = rooms[roomId].map(client => client.userId);
+                rooms[roomId].push({ ws, userId });
                 
-                // The second peer (initiator) is at index 0
-                const initiator = rooms[roomId][0]; 
-                // The new peer (receiver) is at index 1
-                const receiver = ws; 
-
-                // Notify receiver they have joined
-                receiver.send(JSON.stringify({ type: 'joined', roomId }));
-                // Notify initiator that a peer has joined, so it can start signaling
-                initiator.send(JSON.stringify({ type: 'peer-joined' }));
-                console.log(`Peer joined room: ${roomId}`);
+                console.log(`User ${userId} joined room ${roomId}`);
+                
+                // Send the list of existing users to the new user.
+                ws.send(JSON.stringify({
+                    type: 'existing-users',
+                    payload: otherUsers
+                }));
+                
+                // Announce the new user to all other users in the room.
+                rooms[roomId].forEach(({ ws: clientWs, userId: clientUserId }) => {
+                    if (clientWs !== ws) {
+                        clientWs.send(JSON.stringify({
+                            type: 'new-user',
+                            payload: { userId }
+                        }));
+                    }
+                });
                 break;
 
             // Relaying WebRTC signaling data (offer, answer, ICE candidates)
             case 'signal':
-                if (!roomId || !rooms[roomId]) return;
-                // Find the other peer in the room and forward the signal
-                const otherPeer = rooms[roomId].find(client => client !== ws);
-                if (otherPeer) {
-                    otherPeer.send(JSON.stringify({ type: 'signal', payload }));
+                if (!currentRoomId || !payload.to || !payload.from) return;
+
+                const targetClient = rooms[currentRoomId].find(p => p.userId === payload.to);
+                if (targetClient) {
+                    targetClient.ws.send(JSON.stringify({
+                        type: 'signal',
+                        payload: {
+                            signal: payload.signal,
+                            from: payload.from
+                        }
+                    }));
                 }
                 break;
         }
     });
 
     ws.on('close', () => {
-        console.log('Client disconnected');
-        const { roomId } = ws;
-        if (roomId && rooms[roomId]) {
-            // Remove the disconnected client
-            rooms[roomId] = rooms[roomId].filter(client => client !== ws);
-            // If the room is now empty, delete it
-            if (rooms[roomId].length === 0) {
-                delete rooms[roomId];
-                console.log(`Room closed: ${roomId}`);
+        console.log(`Client disconnected: ${currentUserId}`);
+        if (currentRoomId && currentUserId) {
+            // Remove the user from the room
+            rooms[currentRoomId] = rooms[currentRoomId].filter(p => p.userId !== currentUserId);
+            
+            // If the room is empty, delete it
+            if (rooms[currentRoomId].length === 0) {
+                delete rooms[currentRoomId];
+                console.log(`Room ${currentRoomId} is now empty and closed.`);
             } else {
-                // Notify the remaining peer that their partner has left
-                const remainingPeer = rooms[roomId][0];
-                remainingPeer.send(JSON.stringify({ type: 'peer-left' }));
-                 console.log(`Peer left room: ${roomId}`);
+                // Announce that the user has left to everyone else in the room
+                rooms[currentRoomId].forEach(({ ws: clientWs }) => {
+                    clientWs.send(JSON.stringify({
+                        type: 'user-left',
+                        payload: { userId: currentUserId }
+                    }));
+                });
             }
         }
     });
