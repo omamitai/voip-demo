@@ -1,342 +1,269 @@
-// client.js (v2 - Final Production-Ready Version)
-// Frontend logic for the Starlight Calls WebRTC App
+// client.js (v4 - AI Integration)
+// Final, robust, and AI-powered frontend for Starlight Calls
 
-document.addEventListener('DOMContentLoaded', () => {
-    // --- DOM Element References ---
-    // We cache these references for performance and cleaner code.
-    const entryScreen = document.getElementById('entry-screen');
-    const callScreen = document.getElementById('call-screen');
-    const createRoomBtn = document.getElementById('create-room-btn');
-    const copyLinkBtn = document.getElementById('copy-link-btn');
-    const muteBtn = document.getElementById('mute-btn');
-    const disconnectBtn = document.getElementById('disconnect-btn');
-    const statusEl = document.getElementById('status');
-    const roomIdDisplay = document.getElementById('room-id-display');
-    const participantsGrid = document.getElementById('participants-grid');
-    const remoteAudioContainer = document.getElementById('remote-audio-container');
+class StarlightApp {
+    constructor() {
+        this.dom = {
+            screens: { entry: document.getElementById('entry-screen'), lobby: document.getElementById('lobby-screen'), call: document.getElementById('call-screen') },
+            buttons: { createRoom: document.getElementById('create-room-btn'), joinCall: document.getElementById('join-call-btn'), copyLink: document.getElementById('copy-link-btn'), mute: document.getElementById('mute-btn'), summarize: document.getElementById('summarize-btn'), disconnect: document.getElementById('disconnect-btn'), closeSummary: document.getElementById('close-summary-btn') },
+            displays: { entryStatus: document.getElementById('entry-status'), roomId: document.getElementById('room-id-display'), lobbyMicFill: document.getElementById('lobby-mic-level-fill'), participantsGrid: document.getElementById('participants-grid'), remoteAudioContainer: document.getElementById('remote-audio-container'), summaryModal: document.getElementById('summary-modal'), summaryContent: document.getElementById('summary-content') }
+        };
+        this.state = { localStream: null, localUserId: `user-${Math.random().toString(36).substring(2, 9)}`, roomId: null, isMuted: false, peers: {}, localAudioAnalyzer: null, speechRecognition: null, transcript: {} };
+        this.socket = null;
+        this.audioContext = null;
+    }
 
-    // --- Application State ---
-    // Centralized state management makes the app's logic easier to follow.
-    let localStream;    // The user's own microphone audio stream
-    let localUserId;    // A unique ID for the local user
-    let roomId;         // The ID of the room the user is in
-    let isMuted = false;
-    let peers = {};     // A map of connected peers. Key: peer's userId, Value: simple-peer instance
+    init() {
+        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        this.setupUIListeners();
+        this.connectSignalingServer();
+        this.checkForRoomIdInUrl();
+    }
 
-    // Establish a WebSocket connection for signaling.
-    // It automatically uses wss:// on secure (https) connections.
-    const socket = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`);
-
-    // --- Core Application Logic ---
-
-    /**
-     * Initializes the application by setting up listeners and checking the URL for a room ID.
-     * This is the main entry point of the script.
-     */
-    const init = () => {
-        // A unique ID for this user session.
-        localUserId = `user-${Math.random().toString(36).substring(2, 9)}`;
-        
-        setupSocketListeners();
-        setupUIListeners();
-        checkForRoomIdInUrl();
-    };
-
-    /**
-     * Sets up listeners for the UI elements like buttons.
-     */
-    const setupUIListeners = () => {
-        createRoomBtn.addEventListener('click', createRoom);
-        copyLinkBtn.addEventListener('click', copyInviteLink);
-        muteBtn.addEventListener('click', toggleMute);
-        disconnectBtn.addEventListener('click', () => window.location.href = '/'); // Simple disconnect: go home
-    };
-
-    /**
-     * Sets up WebSocket event listeners for handling signaling messages from the server.
-     */
-    const setupSocketListeners = () => {
-        socket.addEventListener('open', () => console.log("Signaling server connection established."));
-        socket.addEventListener('error', (err) => console.error("Signaling server connection error:", err));
-        socket.addEventListener('message', handleSignalingMessage);
-    };
-
-    /**
-     * Routes incoming signaling messages to the appropriate handler function.
-     * This is the central hub for all communication with the signaling server.
-     * @param {MessageEvent} event - The message event from the WebSocket.
-     */
-    const handleSignalingMessage = async (event) => {
-        try {
-            const data = JSON.parse(event.data);
-            console.log('Signal received:', data.type, data.payload);
-
-            switch (data.type) {
-                case 'existing-users': // Received when you first join a room with others.
-                    await startCall(data.payload);
-                    break;
-                case 'new-user': // Received when a new user joins the room you are in.
-                    handleNewUser(data.payload.userId);
-                    break;
-                case 'signal': // Received when a peer sends WebRTC signaling data (offer/answer/candidate).
-                    handleSignal(data.payload);
-                    break;
-                case 'user-left': // Received when a user disconnects from the room.
-                    handleUserLeft(data.payload.userId);
-                    break;
-            }
-        } catch (error) {
-            console.error("Error processing signaling message:", error);
-        }
-    };
+    connectSignalingServer() {
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        this.socket = new WebSocket(`${wsProtocol}//${window.location.host}`);
+        this.socket.addEventListener('open', () => console.log("Signaling server connection established."));
+        this.socket.addEventListener('error', (err) => console.error("Signaling server connection error:", err));
+        this.socket.addEventListener('message', this.handleSignalingMessage.bind(this));
+    }
     
-    /**
-     * Gets access to the user's microphone. This is a prerequisite for starting a call.
-     * @returns {Promise<void>}
-     */
-    const startLocalStream = async () => {
-        try {
-            // This promise will resolve with the audio stream if the user grants permission.
-            localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-            addParticipantCard(localUserId, true); // Add our own card to the UI.
-        } catch(err) {
-            console.error("Error accessing microphone:", err);
-            // Inform the user gracefully instead of failing silently.
-            statusEl.innerHTML = `
-                <span class="text-red-400">Microphone access denied.</span><br>
-                <small>Please allow microphone access in your browser settings to continue.</small>
-            `;
-            // Disable the entry button to prevent further actions.
-            createRoomBtn.disabled = true;
-        }
-    };
+    setupUIListeners() {
+        this.dom.buttons.createRoom.addEventListener('click', () => this.createRoom());
+        this.dom.buttons.joinCall.addEventListener('click', () => this.joinCall());
+        this.dom.buttons.copyLink.addEventListener('click', () => this.copyInviteLink());
+        this.dom.buttons.mute.addEventListener('click', () => this.toggleMute());
+        this.dom.buttons.disconnect.addEventListener('click', () => this.hangUp());
+        this.dom.buttons.summarize.addEventListener('click', () => this.summarizeConversation());
+        this.dom.buttons.closeSummary.addEventListener('click', () => this.toggleSummaryModal(false));
+    }
 
-    // --- Room & Call Lifecycle Functions ---
+    showScreen(screenName) {
+        Object.values(this.dom.screens).forEach(screen => screen.classList.remove('active'));
+        this.dom.screens[screenName].classList.add('active');
+    }
 
-    /**
-     * Handles the logic for creating a new room.
-     */
-    const createRoom = () => {
-        // Generate a unique, human-readable room ID.
-        roomId = `starlight-${Math.random().toString(36).substring(2, 9)}`;
-        // Update the URL in the browser without reloading the page.
-        window.history.pushState({}, '', `?room=${roomId}`);
-        joinRoom(roomId);
-    };
-    
-    /**
-     * Checks if the page URL contains a room ID and attempts to join if it does.
-     */
-    const checkForRoomIdInUrl = () => {
+    checkForRoomIdInUrl() {
         const urlParams = new URLSearchParams(window.location.search);
-        const urlRoomId = urlParams.get('room');
-        if (urlRoomId) {
-            statusEl.textContent = 'Joining room...';
-            joinRoom(urlRoomId);
+        this.state.roomId = urlParams.get('room');
+        if (this.state.roomId) {
+            this.dom.displays.entryStatus.textContent = 'Joining room...';
+            this.prepareToJoin();
         }
-    };
-
-    /**
-     * Joins a specified room by sending a message to the signaling server.
-     * @param {string} targetRoomId - The ID of the room to join.
-     */
-    const joinRoom = (targetRoomId) => {
-        roomId = targetRoomId;
-        // Wait for the socket to be open before sending.
-        if (socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: 'join-room', roomId, userId: localUserId }));
-        } else {
-            // If the socket is not yet open, wait for it.
-            socket.addEventListener('open', () => {
-                socket.send(JSON.stringify({ type: 'join-room', roomId, userId: localUserId }));
-            }, { once: true });
-        }
-        
-        // Transition the UI from the entry screen to the call screen.
-        entryScreen.classList.add('hidden');
-        callScreen.classList.remove('hidden');
-        roomIdDisplay.textContent = roomId;
-    };
+    }
     
-    /**
-     * The main function to initiate the call after joining a room.
-     * It gets the local audio and then connects to all existing users.
-     * @param {string[]} existingUsers - An array of user IDs already in the room.
-     */
-    const startCall = async (existingUsers) => {
-        await startLocalStream();
-        if (!localStream) return; // Exit if microphone access was denied.
+    createRoom() {
+        this.state.roomId = `starlight-${Math.random().toString(36).substring(2, 9)}`;
+        window.history.pushState({}, '', `?room=${this.state.roomId}`);
+        this.prepareToJoin();
+    }
 
-        console.log(`Connecting to ${existingUsers.length} existing user(s)...`);
-        // For each existing user, create a new peer connection. We are the "initiator".
-        for (const userId of existingUsers) {
-            const peer = createPeer(userId, true);
-            peers[userId] = peer;
+    async prepareToJoin() {
+        this.dom.buttons.createRoom.disabled = true;
+        this.dom.displays.entryStatus.textContent = "Checking microphone...";
+        await this.startLocalStream();
+        if (this.state.localStream) {
+            this.showScreen('lobby');
+            this.setupLocalAudioVisualizer();
         }
-    };
+    }
 
-    // --- Peer-to-Peer Connection Handlers ---
-
-    /**
-     * Handles the 'new-user' signal by creating a non-initiator peer connection.
-     * @param {string} userId - The ID of the new user who joined.
-     */
-    const handleNewUser = (userId) => {
-        console.log(`New user joined: ${userId}. Creating peer connection.`);
-        // We are not the initiator because the new user will send the first signal.
-        const peer = createPeer(userId, false);
-        peers[userId] = peer;
-    };
-
-    /**
-     * Relays a signal from the signaling server to the correct local peer instance.
-     * @param {{from: string, signal: any}} payload - The signal data and sender's ID.
-     */
-    const handleSignal = ({ from, signal }) => {
-        const peer = peers[from];
-        if (peer) {
-            peer.signal(signal);
-        } else {
-            console.warn(`Received signal from unknown peer: ${from}`);
+    joinCall() {
+        this.socket.send(JSON.stringify({ type: 'join-room', roomId: this.state.roomId, userId: this.state.localUserId }));
+        this.showScreen('call');
+        this.dom.displays.roomId.textContent = this.state.roomId;
+        this.addParticipantCard(this.state.localUserId, true);
+        this.startTranscription();
+    }
+    
+    handleSignalingMessage(event) {
+        const data = JSON.parse(event.data);
+        switch (data.type) {
+            case 'existing-users': data.payload.forEach(userId => this.createPeer(userId, true)); break;
+            case 'new-user': this.createPeer(data.payload.userId, false); break;
+            case 'signal': this.state.peers[data.payload.from]?.peer.signal(data.payload.signal); break;
+            case 'user-left': this.handleUserLeft(data.payload.userId); break;
+            case 'transcript-chunk': this.handleTranscriptChunk(data.payload); break;
         }
-    };
+    }
 
-    /**
-     * Cleans up the connection and UI elements for a user who has left.
-     * @param {string} userId - The ID of the user who left.
-     */
-    const handleUserLeft = (userId) => {
-        console.log(`User left: ${userId}`);
-        const peer = peers[userId];
-        if (peer) {
-            peer.destroy(); // Gracefully close the connection.
-            delete peers[userId];
+    async startLocalStream() {
+        try {
+            this.state.localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        } catch (err) {
+            this.dom.displays.entryStatus.innerHTML = `<span class="text-red-400">Microphone access denied.</span><br><small>Please allow microphone access in your browser settings.</small>`;
+            this.dom.buttons.createRoom.disabled = true;
         }
-        // Remove the participant's card and audio element from the DOM.
+    }
+
+    createPeer(targetUserId, initiator) {
+        const peer = new SimplePeer({
+            initiator, stream: this.state.localStream,
+            config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' }, { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }] }
+        });
+        peer.on('signal', signal => this.socket.send(JSON.stringify({ type: 'signal', payload: { to: targetUserId, from: this.state.localUserId, signal } })));
+        peer.on('stream', stream => this.addParticipant(targetUserId, stream));
+        peer.on('close', () => this.handleUserLeft(targetUserId));
+        peer.on('error', err => { console.error(`Error with peer ${targetUserId}:`, err); this.handleUserLeft(targetUserId); });
+        this.state.peers[targetUserId] = { peer };
+    }
+
+    handleUserLeft(userId) {
+        if (!this.state.peers[userId]) return;
+        this.state.peers[userId].peer.destroy();
+        delete this.state.peers[userId];
+        delete this.state.transcript[userId];
         document.getElementById(`participant-${userId}`)?.remove();
         document.getElementById(`audio-${userId}`)?.remove();
-    };
-
-    /**
-     * Creates and configures a new SimplePeer instance.
-     * @param {string} targetUserId - The ID of the peer we want to connect to.
-     * @param {boolean} initiator - Whether we are initiating the connection.
-     * @returns {SimplePeer.Instance}
-     */
-    const createPeer = (targetUserId, initiator) => {
-        console.log(`Creating peer for ${targetUserId}, initiator: ${initiator}`);
-        const peer = new SimplePeer({
-            initiator,
-            stream: localStream,
-            // Use a public TURN server for robust connectivity across different networks.
-            config: {
-                iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' }, // Google's public STUN server
-                    { 
-                        urls: 'turn:openrelay.metered.ca:80',
-                        username: 'openrelayproject',
-                        credential: 'openrelayproject'
-                    },
-                    {
-                        urls: 'turn:openrelay.metered.ca:443',
-                        username: 'openrelayproject',
-                        credential: 'openrelayproject'
-                    }
-                ]
-            }
-        });
-
-        // Event listener for when the peer wants to send signaling data.
-        peer.on('signal', (signal) => {
-            socket.send(JSON.stringify({
-                type: 'signal',
-                payload: { to: targetUserId, from: localUserId, signal }
-            }));
-        });
-
-        // Event listener for when we receive the remote user's audio stream.
-        peer.on('stream', (stream) => {
-            console.log(`Received stream from ${targetUserId}`);
-            addRemoteAudio(targetUserId, stream);
-            addParticipantCard(targetUserId);
-        });
-        
-        // Event listeners for connection status and cleanup.
-        peer.on('connect', () => console.log(`Connection to ${targetUserId} established.`));
-        peer.on('close', () => handleUserLeft(targetUserId));
-        peer.on('error', (err) => {
-            console.error(`Error with peer ${targetUserId}:`, err);
-            handleUserLeft(targetUserId); // Clean up on error.
-        });
-        
-        return peer;
-    };
-
-
-    // --- UI & Utility Functions ---
-
-    /**
-     * Copies the current room URL to the user's clipboard.
-     */
-    const copyInviteLink = () => {
-        navigator.clipboard.writeText(window.location.href).then(() => {
-            copyLinkBtn.textContent = 'Copied!';
-            setTimeout(() => {
-                 copyLinkBtn.innerHTML = '<i class="fas fa-copy mr-2"></i>Copy Invite Link';
-            }, 2000);
-        });
-    };
+    }
     
-    /**
-     * Creates and adds an <audio> element to the page for a remote user.
-     * @param {string} userId - The ID of the remote user.
-     * @param {MediaStream} stream - The user's audio stream.
-     */
-    const addRemoteAudio = (userId, stream) => {
+    hangUp() {
+        Object.values(this.state.peers).forEach(({ peer }) => peer.destroy());
+        this.state.peers = {};
+        this.state.localStream?.getTracks().forEach(track => track.stop());
+        this.state.localStream = null;
+        this.state.speechRecognition?.stop();
+        if (this.state.localAudioAnalyzer) cancelAnimationFrame(this.state.localAudioAnalyzer.rafId);
+        this.dom.displays.participantsGrid.innerHTML = '';
+        this.dom.displays.remoteAudioContainer.innerHTML = '';
+        this.state.isMuted = false;
+        this.dom.buttons.mute.classList.add('active'); this.dom.buttons.mute.classList.remove('inactive');
+        this.dom.buttons.mute.innerHTML = '<i class="fas fa-microphone"></i>';
+        this.showScreen('entry');
+        window.history.pushState({}, '', '/');
+    }
+
+    addParticipant(userId, stream) {
         const audio = document.createElement('audio');
-        audio.id = `audio-${userId}`;
-        audio.srcObject = stream;
-        audio.autoplay = true;
-        remoteAudioContainer.appendChild(audio);
-    };
-
-    /**
-     * Creates and adds a participant card to the UI grid.
-     * @param {string} userId - The user's ID.
-     * @param {boolean} isLocal - True if this is the local user's card.
-     */
-    const addParticipantCard = (userId, isLocal = false) => {
-        // Prevent duplicate cards from being added.
-        if (document.getElementById(`participant-${userId}`)) return;
-
-        const card = document.createElement('div');
-        card.id = `participant-${userId}`;
-        card.className = 'participant-card';
-        card.innerHTML = `
-            <div class="w-10 h-10 rounded-full ${isLocal ? 'bg-green-500' : 'bg-indigo-500'} flex items-center justify-center">
-                <i class="fas fa-user text-xl"></i>
-            </div>
-            <div>
-                <p class="font-semibold">${isLocal ? 'You' : `Peer ${userId.substring(0, 4)}`}</p>
-            </div>
-        `;
-        participantsGrid.appendChild(card);
-    };
+        audio.id = `audio-${userId}`; audio.srcObject = stream; audio.autoplay = true;
+        this.dom.displays.remoteAudioContainer.appendChild(audio);
+        this.addParticipantCard(userId);
+        this.state.peers[userId].audioAnalyzer = this.createAudioVisualizer(stream, `participant-${userId}`);
+    }
     
-    /**
-     * Toggles the local user's microphone on and off.
-     */
-    const toggleMute = () => {
-        if (!localStream) return;
-        isMuted = !isMuted;
-        localStream.getAudioTracks()[0].enabled = !isMuted; // Enable/disable the audio track.
-        
-        // Update the UI to reflect the new mute state.
-        muteBtn.classList.toggle('active', !isMuted);
-        muteBtn.classList.toggle('inactive', isMuted);
-        muteBtn.innerHTML = isMuted ? '<i class="fas fa-microphone-slash"></i>' : '<i class="fas fa-microphone"></i>';
-    };
+    addParticipantCard(userId, isLocal = false) {
+        if (document.getElementById(`participant-${userId}`)) return;
+        const card = document.createElement('div');
+        card.id = `participant-${userId}`; card.className = 'participant-card';
+        card.innerHTML = `<div class="w-10 h-10 rounded-full ${isLocal ? 'bg-green-500' : 'bg-indigo-500'} flex items-center justify-center"><i class="fas ${isLocal ? 'fa-user' : 'fa-user-astronaut'} text-xl"></i></div><div><p class="font-semibold">${isLocal ? 'You' : `Peer ${userId.substring(0, 4)}`}</p></div>`;
+        this.dom.displays.participantsGrid.appendChild(card);
+    }
 
-    // --- Application Entry Point ---
-    init();
+    copyInviteLink() { navigator.clipboard.writeText(window.location.href).then(() => { this.dom.buttons.copyLink.textContent = 'Copied!'; setTimeout(() => { this.dom.buttons.copyLink.innerHTML = '<i class="fas fa-copy mr-2"></i>Copy Invite Link'; }, 2000); }); }
+    toggleMute() { if (!this.state.localStream) return; this.state.isMuted = !this.state.isMuted; this.state.localStream.getAudioTracks()[0].enabled = !this.state.isMuted; this.dom.buttons.mute.classList.toggle('active', !this.state.isMuted); this.dom.buttons.mute.classList.toggle('inactive', this.state.isMuted); this.dom.buttons.mute.innerHTML = this.state.isMuted ? '<i class="fas fa-microphone-slash"></i>' : '<i class="fas fa-microphone"></i>'; }
+    setupLocalAudioVisualizer() { this.state.localAudioAnalyzer = this.createAudioVisualizer(this.state.localStream, null, volume => { this.dom.displays.lobbyMicFill.style.width = `${volume}%`; }); }
+    createAudioVisualizer(stream, cardId, onVolumeChange = null) { if (!this.audioContext || stream.getAudioTracks().length === 0) return null; const source = this.audioContext.createMediaStreamSource(stream); const analyser = this.audioContext.createAnalyser(); analyser.fftSize = 512; analyser.minDecibels = -100; analyser.maxDecibels = -10; analyser.smoothingTimeConstant = 0.85; source.connect(analyser); const dataArray = new Uint8Array(analyser.frequencyBinCount); const cardElement = cardId ? document.getElementById(cardId) : null; let rafId; const loop = () => { rafId = requestAnimationFrame(loop); analyser.getByteFrequencyData(dataArray); let average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length; if (cardElement) cardElement.classList.toggle('speaking', average > 10); if (onVolumeChange) onVolumeChange(Math.min(100, average * 2)); }; rafId = requestAnimationFrame(loop); return { rafId, source, analyser }; }
+
+    // --- AI & Transcription Features ---
+
+    startTranscription() {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) { console.warn("Speech Recognition not supported."); return; }
+        this.state.speechRecognition = new SpeechRecognition();
+        this.state.speechRecognition.continuous = true;
+        this.state.speechRecognition.interimResults = true;
+        this.state.speechRecognition.lang = 'en-US';
+
+        this.state.speechRecognition.onresult = (event) => {
+            let interimTranscript = '';
+            let finalTranscript = '';
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                if (event.results[i].isFinal) {
+                    finalTranscript += event.results[i][0].transcript;
+                } else {
+                    interimTranscript += event.results[i][0].transcript;
+                }
+            }
+            if (finalTranscript) {
+                this.socket.send(JSON.stringify({ type: 'transcript-chunk', payload: { from: this.state.localUserId, text: finalTranscript.trim() + '. ' } }));
+            }
+        };
+
+        this.state.speechRecognition.onend = () => {
+            // Restart recognition if we are still in a call
+            if (this.state.localStream) {
+                this.state.speechRecognition.start();
+            }
+        };
+        
+        this.state.speechRecognition.onerror = (event) => {
+            console.error("Speech Recognition Error:", event.error);
+        };
+
+        this.state.speechRecognition.start();
+    }
+
+    handleTranscriptChunk({ from, text }) {
+        if (!this.state.transcript[from]) {
+            this.state.transcript[from] = '';
+        }
+        this.state.transcript[from] += text;
+        console.log(`Transcript from ${from}:`, text);
+    }
+    
+    async summarizeConversation() {
+        this.toggleSummaryModal(true, true); // Show modal in loading state
+
+        const fullTranscript = Object.entries(this.state.transcript)
+            .map(([userId, text]) => `User ${userId.substring(0, 4)}: ${text}`)
+            .join('\n');
+
+        if (fullTranscript.trim().length < 20) {
+            this.dom.displays.summaryContent.innerHTML = `<p>Not enough conversation to summarize yet.</p>`;
+            return;
+        }
+
+        const prompt = `Please provide a concise summary of the following conversation. Use bullet points for key topics and action items if any are mentioned:\n\n${fullTranscript}`;
+        
+        try {
+            const chatHistory = [{ role: "user", parts: [{ text: prompt }] }];
+            const payload = { contents: chatHistory };
+            const apiKey = ""; // API key will be provided by the environment
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+            
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                throw new Error(`API request failed with status ${response.status}`);
+            }
+
+            const result = await response.json();
+            
+            if (result.candidates && result.candidates.length > 0) {
+                const summaryText = result.candidates[0].content.parts[0].text;
+                // Basic markdown to HTML conversion
+                const formattedSummary = summaryText
+                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                    .replace(/\*(.*?)\*/g, '<li>$1</li>')
+                    .replace(/\n/g, '<br>');
+                this.dom.displays.summaryContent.innerHTML = formattedSummary;
+            } else {
+                throw new Error("No summary content received from API.");
+            }
+        } catch (error) {
+            console.error("Error calling Gemini API:", error);
+            this.dom.displays.summaryContent.innerHTML = `<p class="text-red-400">Could not generate summary. Please try again later.</p>`;
+        }
+    }
+    
+    toggleSummaryModal(show, isLoading = false) {
+        if (show) {
+            this.dom.displays.summaryModal.classList.remove('hidden');
+            setTimeout(() => this.dom.displays.summaryModal.classList.remove('opacity-0'), 10);
+            if (isLoading) {
+                this.dom.displays.summaryContent.innerHTML = `<div class="flex items-center justify-center p-8"><i class="fas fa-spinner fa-spin text-3xl text-purple-400"></i><p class="ml-4">Generating summary...</p></div>`;
+            }
+        } else {
+            this.dom.displays.summaryModal.classList.add('opacity-0');
+            setTimeout(() => this.dom.displays.summaryModal.classList.add('hidden'), 200);
+        }
+    }
+}
+
+window.addEventListener('load', () => {
+    new StarlightApp().init();
 });
