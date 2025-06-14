@@ -16,69 +16,103 @@
         body {
             font-family: 'Inter', sans-serif;
             background-color: #111827; /* bg-gray-900 */
+            color: #f9fafb; /* text-gray-50 */
+        }
+        .screen {
+            display: none;
+            min-height: 100vh;
+            align-items: center;
+            justify-content: center;
+        }
+        .screen.active {
+            display: flex;
         }
         .icon-button {
-            @apply w-12 h-12 rounded-full flex items-center justify-center text-xl transition-colors duration-200;
+            @apply w-14 h-14 rounded-full flex items-center justify-center text-2xl transition-all duration-200 focus:outline-none focus:ring-4 focus:ring-offset-2 focus:ring-offset-gray-900;
         }
         .icon-button.active {
-            @apply bg-indigo-600 text-white;
+            @apply bg-indigo-600 text-white hover:bg-indigo-500 focus:ring-indigo-500;
         }
         .icon-button.inactive {
-            @apply bg-gray-700 text-gray-300 hover:bg-gray-600;
+            @apply bg-gray-700 text-gray-300 hover:bg-gray-600 focus:ring-gray-600;
         }
         .icon-button.danger {
-            @apply bg-red-600 text-white hover:bg-red-700;
+            @apply bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
         }
         .participant-card {
-            @apply bg-gray-800 p-4 rounded-lg flex items-center space-x-4 transition-all;
+            @apply bg-gray-800 p-4 rounded-lg flex items-center space-x-4 ring-2 ring-transparent transition-all duration-150;
         }
-        .speaking {
-            box-shadow: 0 0 0 3px #4f46e5; /* ring-indigo-500 */
+        .participant-card.speaking {
+            @apply ring-green-400;
+        }
+        .mic-level {
+            @apply w-full h-2 bg-gray-700 rounded-full overflow-hidden;
+        }
+        .mic-level-fill {
+            @apply h-full bg-green-400 transition-all duration-100;
         }
     </style>
 </head>
-<body class="text-white">
+<body>
 
-    <div id="entry-screen" class="min-h-screen flex items-center justify-center p-4">
-        <div class="w-full max-w-sm space-y-6 text-center">
+    <!-- Entry Screen -->
+    <div id="entry-screen" class="screen active flex-col p-4 text-center">
+        <div class="w-full max-w-sm space-y-6">
             <div>
                 <i class="fa-solid fa-star-of-life text-5xl text-indigo-400"></i>
                 <h1 class="text-4xl font-bold mt-4">Starlight Calls</h1>
-                <p id="status" class="text-gray-400 mt-2">Create a room to start a call.</p>
+                <p id="entry-status" class="text-gray-400 mt-2 h-10">Create a room to start a call.</p>
             </div>
-            <button id="create-room-btn" class="w-full px-4 py-3 font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-900 transition-colors">
+            <button id="create-room-btn" class="w-full px-4 py-3 font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:bg-gray-500 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-900 transition-colors">
                 Create New Room
             </button>
         </div>
     </div>
 
-    <div id="call-screen" class="hidden min-h-screen flex flex-col p-4">
-        <!-- Header -->
-        <header class="flex-shrink-0 flex items-center justify-between mb-4">
-            <h1 class="text-2xl font-bold">Room: <span id="room-id-display" class="font-mono text-indigo-400"></span></h1>
-            <button id="copy-link-btn" class="px-3 py-2 text-sm font-medium bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors">
-                <i class="fas fa-copy mr-2"></i>Copy Invite Link
+    <!-- Lobby Screen -->
+    <div id="lobby-screen" class="screen flex-col p-4 text-center">
+        <div class="w-full max-w-sm space-y-6">
+            <h2 class="text-3xl font-bold">Ready to Join?</h2>
+            <p class="text-gray-400">Your microphone is on. You can mute yourself after joining.</p>
+            <div class="mic-level">
+                <div id="lobby-mic-level-fill" class="mic-level-fill" style="width: 0%;"></div>
+            </div>
+            <button id="join-call-btn" class="w-full px-4 py-3 font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 focus:ring-offset-gray-900 transition-colors">
+                Join Call Now
             </button>
-        </header>
+        </div>
+    </div>
 
-        <!-- Participants Grid -->
-        <main class="flex-grow grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4" id="participants-grid">
-            <!-- Participant cards will be inserted here -->
-        </main>
+    <!-- Call Screen -->
+    <div id="call-screen" class="screen !flex-col !justify-start p-4">
+        <div class="w-full h-full flex flex-col">
+            <!-- Header -->
+            <header class="flex-shrink-0 flex items-center justify-between mb-4">
+                <h1 class="text-2xl font-bold">Room: <span id="room-id-display" class="font-mono text-indigo-400"></span></h1>
+                <button id="copy-link-btn" class="px-3 py-2 text-sm font-medium bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors">
+                    <i class="fas fa-copy mr-2"></i>Copy Invite Link
+                </button>
+            </header>
 
-        <!-- Controls Footer -->
-        <footer class="flex-shrink-0 bg-gray-800/50 backdrop-blur-sm rounded-xl mt-4 p-4 flex items-center justify-center space-x-4">
-            <button id="mute-btn" class="icon-button active">
-                <i class="fas fa-microphone"></i>
-            </button>
-            <button id="disconnect-btn" class="icon-button danger">
-                <i class="fas fa-phone-slash"></i>
-            </button>
-        </footer>
+            <!-- Participants Grid -->
+            <main class="flex-grow grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4" id="participants-grid">
+                <!-- Participant cards will be inserted here -->
+            </main>
+
+            <!-- Controls Footer -->
+            <footer class="flex-shrink-0 bg-gray-800/50 backdrop-blur-sm rounded-xl mt-4 p-4 flex items-center justify-center space-x-4">
+                <button id="mute-btn" class="icon-button active">
+                    <i class="fas fa-microphone"></i>
+                </button>
+                <button id="disconnect-btn" class="icon-button danger">
+                    <i class="fas fa-phone-slash"></i>
+                </button>
+            </footer>
+        </div>
     </div>
     
-    <!-- Container for remote audio elements -->
-    <div id="remote-audio-container"></div>
+    <!-- Container for remote audio elements (hidden from user) -->
+    <div id="remote-audio-container" class="hidden"></div>
 
     <!-- Simple-Peer library -->
     <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
