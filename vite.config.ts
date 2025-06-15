@@ -4,6 +4,11 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  // --- ADD THIS SECTION START ---
+  define: {
+    global: 'window',
+  },
+  // --- ADD THIS SECTION END ---
   server: {
     // This proxy is for development only, to forward WebSocket requests to your backend server.
     proxy: {
