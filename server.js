@@ -1,6 +1,4 @@
-// server.js (v5 - Beta-Ready)
-// Production-ready signaling server for the Starlight Pro React application.
-
+// server.js (Revised for two-user seamless pairing)
 import express from 'express';
 import http from 'http';
 import { WebSocketServer } from 'ws';
@@ -16,18 +14,20 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 const PORT = process.env.PORT || 8080;
-const rooms = {}; // In-memory store for rooms. For production, consider Redis.
+
+// In-memory store for pairing. `waitingUser` holds the first user until the second one connects.
+let waitingUser = null;
+// A map to hold the two paired users for easy signaling.
+const pairs = new Map();
 
 // --- Middleware ---
-// Serve the built React application from the 'dist' directory.
 app.use(express.static(path.join(__dirname, 'dist')));
 
 // --- WebSocket Signaling Logic ---
 wss.on('connection', (ws) => {
-    console.log('[Server] A client connected to the signaling server.');
-    let currentRoomId = null;
     let currentUserId = null;
 
+    // Handle incoming messages
     ws.on('message', (message) => {
         let data;
         try {
@@ -37,88 +37,78 @@ wss.on('connection', (ws) => {
             return;
         }
 
-        const { type, roomId, userId, payload } = data;
+        const { type, userId, payload } = data;
+        currentUserId = userId; // Keep track of the user ID for this connection
 
         switch (type) {
-            case 'join-room':
-                if (!roomId || !userId) return;
-                
-                currentRoomId = roomId;
-                currentUserId = userId;
+            case 'user-ready':
+                console.log(`[Server] User ${userId} is ready.`);
+                ws.userId = userId; // Attach userId to the websocket connection object
 
-                if (!rooms[roomId]) {
-                    rooms[roomId] = [];
-                    console.log(`[Server] Room created: ${roomId}`);
+                if (waitingUser) {
+                    // Pair found!
+                    const peer1 = waitingUser;
+                    const peer2 = ws;
+
+                    // Create a pair mapping
+                    pairs.set(peer1.userId, peer2);
+                    pairs.set(peer2.userId, peer1);
+
+                    // Notify both users they have been paired
+                    console.log(`[Server] Pairing ${peer1.userId} and ${peer2.userId}.`);
+                    peer1.send(JSON.stringify({ type: 'initiate-peer', payload: { peerId: peer2.userId } }));
+                    peer2.send(JSON.stringify({ type: 'wait-for-peer', payload: { peerId: peer1.userId } }));
+
+                    waitingUser = null; // Reset the waiting user
+                } else {
+                    // This is the first user, make them wait
+                    waitingUser = ws;
+                    ws.send(JSON.stringify({ type: 'wait' }));
+                    console.log(`[Server] User ${userId} is waiting for a partner.`);
                 }
-
-                // Add the new user to the room.
-                rooms[roomId].push({ ws, userId });
-                console.log(`[Server] User ${userId} joined room ${roomId}. Total users: ${rooms[roomId].length}`);
-
-                // Send the list of existing users to the newcomer.
-                const existingUsers = rooms[roomId]
-                    .map(client => client.userId)
-                    .filter(id => id !== currentUserId);
-                
-                ws.send(JSON.stringify({
-                    type: 'existing-users',
-                    payload: existingUsers
-                }));
-
-                // Announce the new user to everyone else in the room.
-                rooms[roomId].forEach(({ ws: clientWs, userId: clientUserId }) => {
-                    if (clientUserId !== currentUserId) {
-                        clientWs.send(JSON.stringify({ type: 'new-user', payload: { userId } }));
-                    }
-                });
                 break;
 
             case 'signal':
-                if (!roomId || !payload || !payload.to || !payload.from) return;
-                
-                const targetClient = rooms[roomId]?.find(p => p.userId === payload.to);
-                if (targetClient) {
-                    // console.log(`[Server] Relaying signal from ${payload.from} to ${payload.to}`);
-                    targetClient.ws.send(JSON.stringify({
+                const targetWs = pairs.get(payload.to);
+                if (targetWs) {
+                    // Relay signal to the other user in the pair
+                    targetWs.send(JSON.stringify({
                         type: 'signal',
                         payload: { signal: payload.signal, from: payload.from }
                     }));
-                } else {
-                    console.warn(`[Server] Could not find target client ${payload.to} in room ${roomId} to relay signal.`);
                 }
                 break;
         }
     });
 
+    // Handle client disconnection
     ws.on('close', () => {
         console.log(`[Server] Client disconnected: ${currentUserId}`);
-        if (currentRoomId && currentUserId) {
-            // Remove the user from the room.
-            rooms[currentRoomId] = rooms[currentRoomId]?.filter(p => p.userId !== currentUserId);
-            
-            if (rooms[currentRoomId]?.length === 0) {
-                delete rooms[currentRoomId];
-                console.log(`[Server] Room ${currentRoomId} is now empty and has been closed.`);
-            } else {
-                // Announce that the user has left to everyone else.
-                console.log(`[Server] Announcing user ${currentUserId} has left room ${currentRoomId}.`);
-                rooms[currentRoomId]?.forEach(({ ws: clientWs }) => {
-                    clientWs.send(JSON.stringify({ type: 'user-left', payload: { userId: currentUserId } }));
-                });
-            }
+        
+        // If the disconnected user was waiting, clear the waiting spot.
+        if (waitingUser && waitingUser.userId === currentUserId) {
+            waitingUser = null;
+            console.log('[Server] The waiting user disconnected.');
+        }
+
+        // If the user was in a pair, notify the other user.
+        const pairedUser = pairs.get(currentUserId);
+        if (pairedUser) {
+            console.log(`[Server] Notifying ${pairedUser.userId} that their partner has left.`);
+            pairedUser.send(JSON.stringify({ type: 'partner-left', payload: { userId: currentUserId } }));
+            // Clean up the pair mapping
+            pairs.delete(currentUserId);
+            pairs.delete(pairedUser.userId);
         }
     });
 });
 
 // --- HTTP Routes ---
-// This wildcard route is crucial. It ensures that if a user refreshes a page
-// on a client-side route (e.g., /room/xyz), the server still sends the main
-// React app, allowing React Router to handle the URL.
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
 // --- Start Server ---
 server.listen(PORT, () => {
-    console.log(`[Server] Starlight Pro server is live and listening on http://localhost:${PORT}`);
+    console.log(`[Server] Starlight Pro (2-User) server is live on http://localhost:${PORT}`);
 });
