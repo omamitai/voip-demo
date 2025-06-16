@@ -1,31 +1,43 @@
 {
-  "name": "starlight-calls-react",
+  "name": "starlight-voip-pro",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "server": "node server.js"
+    "server": "node server.js",
+    "start": "concurrently \"npm run server\" \"npm run dev\"",
+    "prod": "npm run build && npm run server"
   },
   "dependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "simple-peer": "^9.11.1",
-    "zustand": "^4.5.2"
+    "zustand": "^4.5.2",
+    "socket.io-client": "^4.7.2",
+    "lucide-react": "^0.263.1",
+    "webrtc-adapter": "^8.2.3",
+    "recordrtc": "^5.6.2",
+    "framer-motion": "^11.0.3",
+    "react-hot-toast": "^2.4.1",
+    "clsx": "^2.1.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
     "@types/simple-peer": "^9.11.8",
+    "@types/recordrtc": "^5.6.12",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.19",
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.3",
     "typescript": "^5.2.2",
     "vite": "^5.2.0",
-    "ws": "^8.17.0",
-    "express": "^4.19.2"
+    "socket.io": "^4.7.2",
+    "express": "^4.19.2",
+    "concurrently": "^8.2.2",
+    "cors": "^2.8.5"
   }
 }
